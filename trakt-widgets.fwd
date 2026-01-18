@@ -10,7 +10,7 @@
       "requiredVersion": "0.0.1",
       "version": "1.0.0",
       "author": "User",
-      "url": "https://你的服务器/trakt_sync.js"
+      "url": "https://github.com/Solaris-Starfire/forward/blob/main/trakt_sync.js"
     }
   ]
 }
