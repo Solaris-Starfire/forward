@@ -1,0 +1,16 @@
+{
+  "title": "My Custom Widgets",
+  "description": "个人自用插件源",
+  "icon": "https://trakt.tv/assets/logos/header-icon-360d039956.png",
+  "widgets": [
+    {
+      "id": "user.trakt.sync",
+      "title": "Trakt 单向同步",
+      "description": "通过 TMDB ID 将观看记录单向推送到 Trakt (需自备 Token)",
+      "requiredVersion": "0.0.1",
+      "version": "1.0.0",
+      "author": "User",
+      "url": "https://你的服务器/trakt_sync.js"
+    }
+  ]
+}
