@@ -1,28 +1,25 @@
 /**
- * Forward Widget - Trakt Sync
- * * 核心修改点：
- * 1. 使用 `args` 定义输入框，Forward 会在界面上渲染这些选项。
- * 2. 脚本中不再包含任何硬编码的 Token，保护隐私。
- * 3. 每次运行组件时，Forward 会把界面上填的值传给 params。
+ * Forward Widget - Trakt Sync (Fix Version)
  */
 
-// --- 1. 组件配置 (UI 定义) ---
+// 1. 配置定义 (Forward 会读取这里的配置来生成界面)
+// 注意：如果你的 .json 仓库文件中没有写 "args"，Forward 会尝试读取这里的 config
 const config = {
-  script: "SyncTraktHistory",  // 必须与下方函数名一致
+  script: "SyncTraktHistory",
   functionName: "SyncTraktHistory",
   args: [
     {
       type: "input",
       name: "clientId",
       label: "Client ID",
-      placeholder: "在此粘贴 Trakt Client ID",
+      placeholder: "输入 Client ID",
       required: true
     },
     {
       type: "input",
       name: "accessToken",
       label: "Access Token",
-      placeholder: "在此粘贴 Access Token",
+      placeholder: "输入 Access Token",
       required: true
     },
     {
@@ -39,39 +36,46 @@ const config = {
       type: "input",
       name: "tmdbId",
       label: "TMDB ID",
-      placeholder: "例如: 27205 (每次同步前修改此项)",
+      placeholder: "例如: 27205",
       required: true
     }
   ]
 };
 
-// --- 2. 逻辑处理函数 ---
+// 2. 核心处理函数
 async function SyncTraktHistory(params = {}) {
   try {
-    // 验证：检查用户是否在界面上填写了参数
-    if (!params.clientId || !params.accessToken) {
-      throw new Error("❌ 未配置授权信息！请长按组件进入编辑模式填写 Token。");
-    }
-    if (!params.tmdbId) {
-      throw new Error("❌ 请输入 TMDB ID");
+    // [修复1] 增加空值保护，防止 params 为空时崩溃
+    if (!params) params = {};
+
+    // 检查参数是否填写，没填则返回提示卡片（而不是抛错导致崩溃）
+    if (!params.clientId || !params.accessToken || !params.tmdbId) {
+      return [{
+        id: "tips",
+        type: "url",
+        title: "⚙️ 需要配置",
+        description: "请长按组件 -> 编辑 -> 填写 Token 和 ID",
+        posterPath: "https://trakt.tv/assets/logos/header-icon-360d039956.png",
+        mediaType: "tv",
+        link: "",
+        playerType: "system"
+      }];
     }
 
     const API_URL = "https://api.trakt.tv/sync/history";
     const tmdbId = parseInt(params.tmdbId);
     
-    // 构造 Trakt API 需要的数据包
-    let requestBody = {};
+    // 构造 Body
+    let requestBodyRaw = {};
     if (params.mediaType === "movies") {
-      requestBody = { 
-        movies: [{ ids: { tmdb: tmdbId } }] 
-      };
+      requestBodyRaw = { movies: [{ ids: { tmdb: tmdbId } }] };
     } else {
-      requestBody = { 
-        episodes: [{ ids: { tmdb: tmdbId } }] 
-      };
+      requestBodyRaw = { episodes: [{ ids: { tmdb: tmdbId } }] };
     }
 
-    // 设置请求头
+    // [修复2] 显式转换为 JSON 字符串
+    const requestBody = JSON.stringify(requestBodyRaw);
+
     const options = {
       headers: {
         "Content-Type": "application/json",
@@ -82,21 +86,36 @@ async function SyncTraktHistory(params = {}) {
       }
     };
 
-    // 发送 POST 请求 (只推不拉，单向)
+    // 发送请求
     const response = await Widget.http.post(API_URL, requestBody, options);
-    const result = response.data;
-
-    // 解析结果用于展示
-    let addedCount = 0;
-    if (params.mediaType === "movies") {
-      addedCount = result.added ? result.added.movies : 0;
-    } else {
-      addedCount = result.added ? result.added.episodes : 0;
-    }
     
-    // 生成状态卡片
-    const statusTitle = addedCount > 0 ? "✅ 同步成功" : "⚠️ 未变动 (可能已存在)";
-    const statusDesc = `ID: ${tmdbId} | 类型: ${params.mediaType === 'movies' ? '电影' : '剧集'}`;
+    // [修复3] 安全解析响应数据 (兼容字符串或对象)
+    let result = response.data;
+    if (typeof result === 'string') {
+      try {
+        result = JSON.parse(result);
+      } catch (e) {
+        console.error("JSON Parse Error:", e);
+        throw new Error("Trakt 返回数据格式错误");
+      }
+    }
+
+    // 解析结果
+    let addedCount = 0;
+    // 增加对 result.added 的空值检查
+    if (result && result.added) {
+      if (params.mediaType === "movies") {
+        addedCount = result.added.movies;
+      } else {
+        addedCount = result.added.episodes;
+      }
+    } else {
+        // 如果 Trakt 返回了 401 等错误信息，result 可能不包含 added
+        console.log("Trakt Response:", JSON.stringify(result));
+    }
+
+    const statusTitle = addedCount > 0 ? "✅ 同步成功" : "⚠️ 未变动";
+    const statusDesc = `ID: ${tmdbId} | 类型: ${params.mediaType}`;
 
     return [
       {
@@ -113,13 +132,14 @@ async function SyncTraktHistory(params = {}) {
 
   } catch (error) {
     console.error("Trakt Widget Error:", error);
+    // 即使出错，也必须返回一个符合格式的对象数组，否则就会报 "Data Missing"
     return [
       {
         id: "error",
         type: "url",
-        title: "❌ 错误",
-        description: error.message || "未知网络错误",
-        posterPath: "",
+        title: "❌ 发生错误",
+        description: error.message || "未知错误",
+        posterPath: "https://trakt.tv/assets/logos/header-icon-360d039956.png",
         mediaType: "tv",
         link: "",
         playerType: "system"
@@ -127,8 +147,4 @@ async function SyncTraktHistory(params = {}) {
     ];
   }
 }
-
-// 某些运行环境需要导出 config，视具体实现而定，建议保留
-if (typeof module !== 'undefined') {
-  module.exports = config;
-}
+// [修复4] 删除了 module.exports，防止环境不支持导致崩溃
